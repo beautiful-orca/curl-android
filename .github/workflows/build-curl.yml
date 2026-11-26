@@ -183,7 +183,6 @@ jobs:
           BUILD_TOOLS_ZIP: ${{ steps.resolve.outputs.build_tools_zip }}
           PLATFORM_VERSION: ${{ steps.resolve.outputs.platform }}
           PLATFORM_ZIP: ${{ steps.resolve.outputs.platform_zip }}
-          PLATFORM_TOOLS_ZIP: ${{ steps.resolve.outputs.platform_tools_zip }}
         run: |
           set -euo pipefail
           base=https://dl.google.com/android/repository
@@ -193,15 +192,15 @@ jobs:
                    "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" \
                    "$ANDROID_HOME/platforms/$PLATFORM_VERSION"
 
-          curl -fsSL -o "$tmp/ndk.zip"    "$base/$NDK_ZIP"
-          curl -fsSL -o "$tmp/bt.zip"     "$base/$BUILD_TOOLS_ZIP"
-          curl -fsSL -o "$tmp/plat.zip"   "$base/$PLATFORM_ZIP"
-          curl -fsSL -o "$tmp/ptools.zip" "$base/$PLATFORM_TOOLS_ZIP"
+          # platform-tools is not downloaded: the runner image already ships
+          # it, and unzip would prompt on the existing files and fail.
+          curl -fsSL -o "$tmp/ndk.zip"  "$base/$NDK_ZIP"
+          curl -fsSL -o "$tmp/bt.zip"   "$base/$BUILD_TOOLS_ZIP"
+          curl -fsSL -o "$tmp/plat.zip" "$base/$PLATFORM_ZIP"
 
-          unzip -q "$tmp/ndk.zip"    -d "$tmp/ndk"
-          unzip -q "$tmp/bt.zip"     -d "$tmp/bt"
-          unzip -q "$tmp/plat.zip"   -d "$tmp/plat"
-          unzip -q "$tmp/ptools.zip" -d "$ANDROID_HOME"
+          unzip -q "$tmp/ndk.zip"  -d "$tmp/ndk"
+          unzip -q "$tmp/bt.zip"   -d "$tmp/bt"
+          unzip -q "$tmp/plat.zip" -d "$tmp/plat"
 
           mv "$tmp"/ndk/android-ndk-r*/ "$ANDROID_HOME/ndk/$NDK_VERSION"
           mv "$tmp"/bt/*   "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"

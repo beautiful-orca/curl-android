@@ -10,8 +10,9 @@
 #   - Android Gradle Plugin: latest stable version on dl.google.com
 #   - Gradle wrapper: services.gradle.org/versions/current
 #   - JDK: latest LTS from Adoptium
-#   - NDK, build-tools, platform, platform-tools: latest stable entries in
-#     Google's repository2-*.xml (previews/betas/rcs excluded)
+#   - NDK, build-tools, platform: latest stable entries in Google's
+#     repository2-*.xml (previews/betas/rcs excluded). platform-tools ships
+#     with the runner image, so it is not resolved.
 #
 # Nothing here is pinned in the repo; run it from the repo root. When
 # GITHUB_OUTPUT is not set (local run) the outputs are printed to stdout.
@@ -99,7 +100,7 @@ def url(body):
     m = re.search(r'<url>([^<]+)</url>', body)
     return m.group(1) if m else ''
 
-ndk, bt, plat, pt = [], [], [], []
+ndk, bt, plat = [], [], []
 for path, body in blocks:
     if not stable(body, path):
         continue
@@ -110,8 +111,6 @@ for path, body in blocks:
         bt.append((revision(body), path, u))
     elif re.fullmatch(r'platforms;android-\d+', path):
         plat.append((int(path.rsplit('-', 1)[1]), path, u))
-    elif path == 'platform-tools':
-        pt.append((revision(body), path, u))
 
 def last(entries):
     return sorted(entries)[-1]
@@ -119,7 +118,6 @@ def last(entries):
 ndk_rev, ndk_path, ndk_zip = last(ndk)
 bt_rev, bt_path, bt_zip = last(bt)
 plat_api, plat_path, plat_zip = last(plat)
-pt_rev, pt_path, pt_zip = last(pt)
 
 print('ndk_version=%s' % '.'.join(str(x) for x in ndk_rev))
 print('ndk_zip=%s' % ndk_zip)
@@ -128,7 +126,6 @@ print('build_tools_zip=%s' % bt_zip)
 print('platform=android-%d' % plat_api)
 print('platform_api=%d' % plat_api)
 print('platform_zip=%s' % plat_zip)
-print('platform_tools_zip=%s' % pt_zip)
 PY
 )
 
@@ -156,7 +153,6 @@ fingerprint="curl=$curl_version c-ares=$cares_tag nghttp2=$nghttp2_tag nghttp3=$
   echo "platform=$platform"
   echo "platform_api=$platform_api"
   echo "platform_zip=$platform_zip"
-  echo "platform_tools_zip=$platform_tools_zip"
   echo "fingerprint=$fingerprint"
 } >> "$out"
 

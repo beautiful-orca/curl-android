@@ -159,6 +159,10 @@ jobs:
         if: steps.detect.outputs.update == 'true'
         run: ./scripts/patch-config.sh
 
+      - name: Patch curl's BoringSSL shims
+        if: steps.detect.outputs.update == 'true'
+        run: ./scripts/patch-curl.sh
+
       - name: Materialise generated sources
         if: steps.detect.outputs.update == 'true'
         run: ./scripts/prepare-sources.sh

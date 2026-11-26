@@ -1,81 +1,85 @@
-# curl Android
+# curl Android (beautiful-orca fork)
 
-curl tool and libcurl static library prefab for android.
+Fork of [vvb2060/curl-android](https://github.com/vvb2060/curl-android) that builds
+the standalone `curl` binary shipped in
+[open_webview](https://github.com/beautiful-orca/open_webview) (installed as
+`common/tools/tools/$ARCH/curl` in the Magisk module).
 
-Supports TLS, powered by [BoringSSL](https://github.com/google/boringssl). In this
-fork BoringSSL is built from the `google/boringssl` submodule by
-`scripts/build-boringssl.sh` (with the cert-dir patch from
-`vvb2060/BoringSSL_Android` vendored under `curl/src/main/native/patches/`), not
-consumed as a Maven prefab.
+Everything is built from source submodules — there is no Maven prefab for TLS
+anymore:
 
-Supports HTTP/2, powered by [nghttp2](https://github.com/nghttp2/nghttp2).
+| component | submodule (latest release tag) | purpose |
+|---|---|---|
+| curl | `curl/src/main/native/curl` | the tool / libcurl |
+| c-ares | `curl/src/main/native/c-ares` | async DNS resolver, enables `--dns-servers` |
+| BoringSSL | `curl/src/main/native/boringssl` (`google/boringssl`) | TLS + HTTP/3 crypto |
+| nghttp2 | `curl/src/main/native/nghttp2` | HTTP/2 |
+| ngtcp2 + nghttp3 | `curl/src/main/native/ngtcp2`, `.../nghttp3` | HTTP/3 |
 
-Supports HTTP/3, powered by BoringSSL backend [ngtcp2](https://github.com/ngtcp2/ngtcp2) and [nghttp3](https://github.com/ngtcp2/nghttp3).
+Behavior notes:
 
-By default, use system built-in CA certificate store, and use system built-in DNS.
+- Resolver is c-ares, not the threaded resolver: the `USE_ARES` patch in
+  `config32/64/curl_config.h` is re-asserted by `scripts/patch-config.sh` before
+  every build, and `scripts/verify-curl.sh` refuses to publish a binary that is
+  not a c-ares build.
+- BoringSSL is compiled by `scripts/build-boringssl.sh` with the cert-dir patch
+  from `vvb2060/BoringSSL_Android` (vendored under
+  `curl/src/main/native/patches/`), so the default CA store is Android's
+  `/system/etc/security/cacerts`. `scripts/patch-curl.sh` handles curl ↔
+  BoringSSL API drift.
+- By default: system CA certificate store, c-ares DNS (`--dns-servers` works).
 
+If you only want to use the curl tool, download a release and extract
+`curl-<abi>` — it is the `libcurl.so` from the APK, ready to run.
 
-If you only want to use curl tool, unzip apk, extract `libcurl.so` and rename it to `curl`.
+## Releases
 
-## Integration
+`.github/workflows/build-curl.yml` runs daily (and on manual dispatch with a
+`force` option). Nothing is pinned in the repo: `scripts/resolve-latest.sh`
+resolves the latest stable release of every component and build tool at run
+time (submodule tags, AGP, Gradle wrapper, JDK LTS, NDK / build-tools /
+platform from Google's repository XML) into a fingerprint, and the job builds
+only when that fingerprint differs from the `components:` line in the latest
+release's notes. A build checks the submodules out at their release tags, seds
+the resolved versions into the gradle files in the ephemeral runner, builds all
+five ABIs (`arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`, `riscv64`), verifies the
+binaries (c-ares and BoringSSL linked, cert-dir string present, NEEDED limited
+to platform libs, 16 KB aligned on 64-bit ABIs), and publishes a GitHub release
+`v<curl-version>` with the `curl-<abi>` binaries and `SHA256SUMS`. If anything
+fails, nothing is published. `open_webview` picks the newest release's
+`curl-$ABI` asset automatically.
 
-Gradle:
+## Manual build
 
-```gradle
-implementation("io.github.vvb2060.ndk:curl:8.18.0")
-// or LTO version (~40MiB), it does not strip any debug info
-implementation("io.github.vvb2060.ndk:curl:8.18.0-lto-ndk29")
+```sh
+git clone --recurse-submodules https://github.com/beautiful-orca/curl-android.git
+cd curl-android
+./scripts/prepare-sources.sh
+./scripts/patch-config.sh
+./scripts/patch-curl.sh
+./scripts/build-boringssl.sh   # needs an NDK under $ANDROID_HOME/ndk
+./scripts/build-cares.sh
+./gradlew :tool:assembleRelease
+unzip -j tool/build/outputs/apk/release/tool-release.apk 'lib/*/libcurl.so' -d out-extracted
 ```
 
-This library is [Prefab](https://google.github.io/prefab/), so you will need to enable it in your project (Android Gradle Plugin 4.1+):
+## Prefab / Maven integration
 
-```gradle
-android {
-    ...
-    buildFeatures {
-        ...
-        prefab = true
-    }
-}
-```
-
-## Usage
-
-### ndk-build
-
-you can use `curl_static` in your `Android.mk`.
-For example, if your application defines `libapp.so` and it uses `curl_static`, your `Android.mk` file should include the following:
-
-```makefile
-include $(CLEAR_VARS)
-LOCAL_MODULE           := app
-LOCAL_SRC_FILES        := app.cpp
-LOCAL_STATIC_LIBRARIES := curl_static
-include $(BUILD_SHARED_LIBRARY)
-
-# If you don't need your project to build with NDKs older than r21, you can omit
-# this block.
-ifneq ($(call ndk-major-at-least,21),true)
-    $(call import-add-path,$(NDK_GRADLE_INJECTED_IMPORT_PATH))
-endif
-
-$(call import-module,prefab/curl)
-```
-
-### CMake
-
-you can use `curl_static` in your `CMakeLists.txt`.
-For example, if your application defines `libapp.so` and it uses `curl_static`, your `CMakeLists.txt` file should include the following:
-
-```cmake
-add_library(app SHARED app.cpp)
-
-# Add these two lines.
-find_package(curl REQUIRED CONFIG)
-target_link_libraries(app curl::curl_static)
-```
+To consume libcurl as a prefab dependency in your own Android app, use the
+upstream [vvb2060/curl-android](https://github.com/vvb2060/curl-android) Maven
+artifacts — this fork builds the standalone binary and no longer depends on the
+BoringSSL prefab.
 
 ## Version
+
+### 8.23.0
+- curl 8.23.0, c-ares 1.34.9, nghttp2 1.71.0, nghttp3 1.19.0, ngtcp2 1.26.0,
+  boringssl 0.20261105.0 (built from source)
+- NDK r30, AGP 9.5.3, Gradle 9.9.2, JDK 25
+- first release from this fork's automated pipeline; from here on the exact
+  component versions are listed in each release's notes
+
+<details>
 
 ### 8.18.0
 - curl 8.18.0
@@ -83,8 +87,6 @@ target_link_libraries(app curl::curl_static)
 - nghttp3 1.14.0
 - ngtcp2 1.19.0
 - boringssl 20251124
-
-<details>
 
 ### 8.12.0
 - curl 8.12.0

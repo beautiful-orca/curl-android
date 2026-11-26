@@ -27,11 +27,13 @@ if ! grep -q 'static size_t ASN1_STRING_get_length' "$CURL_VTLS"; then
   exit 0
 fi
 
-if grep -q '!defined(OPENSSL_IS_BORINGSSL)' "$CURL_VTLS"; then
+# Anchor on the full guard line: the file already contains other
+# !defined(OPENSSL_IS_BORINGSSL) occurrences.
+if grep -q '0x40100000L && !defined(OPENSSL_IS_BORINGSSL)' "$CURL_VTLS"; then
   echo "shim already disabled for BoringSSL"
 elif grep -q 'ASN1_STRING_get_length' "$BSSL_ASN1"; then
   sed -i 's|^#if OPENSSL_VERSION_NUMBER < 0x40100000L$|#if OPENSSL_VERSION_NUMBER < 0x40100000L \&\& !defined(OPENSSL_IS_BORINGSSL)|' "$CURL_VTLS"
-  grep -q '!defined(OPENSSL_IS_BORINGSSL)' "$CURL_VTLS" \
+  grep -q '0x40100000L && !defined(OPENSSL_IS_BORINGSSL)' "$CURL_VTLS" \
     || { echo "FAIL: could not disable the shim" >&2; exit 1; }
   echo "disabled curl's ASN1_STRING_get_length shim for BoringSSL"
 else

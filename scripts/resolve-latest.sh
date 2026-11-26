@@ -19,10 +19,14 @@ set -eu
 
 out=${GITHUB_OUTPUT:-/dev/stdout}
 
-auth=()
-if [ -n "${GH_TOKEN:-}" ]; then
-  auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
-fi
+# POSIX sh has no arrays; wrap curl to add the auth headers.
+gh_curl() {
+  if [ -n "${GH_TOKEN:-}" ]; then
+    curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"
+  else
+    curl -fsSL "$@"
+  fi
+}
 
 emit() { printf '%s=%s\n' "$1" "$2" >> "$out"; }
 
@@ -30,7 +34,7 @@ emit() { printf '%s=%s\n' "$1" "$2" >> "$out"; }
 # tag if the repo has no GitHub releases.
 latest_tag() {
   repo=$1
-  tag=$(curl -fsSL "${auth[@]}" "https://api.github.com/repos/$repo/releases/latest" \
+  tag=$(gh_curl "https://api.github.com/repos/$repo/releases/latest" \
         | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' || true)
   if [ -z "$tag" ]; then
     tag=$(git ls-remote --tags "https://github.com/$repo.git" \
@@ -54,7 +58,7 @@ boringssl_tag=$(git ls-remote --tags https://github.com/google/boringssl.git 're
 [ -n "$boringssl_tag" ] || { echo "cannot resolve latest boringssl tag" >&2; exit 1; }
 
 curl_version=${curl_tag#curl-}
-curl_version=${curl_version//_/.}
+curl_version=$(printf '%s' "$curl_version" | tr '_' '.')
 
 # Latest stable AGP from Google's Maven metadata (<latest> can be an alpha).
 agp=$(curl -fsSL "https://dl.google.com/dl/android/maven2/com/android/application/com.android.application.gradle.plugin/maven-metadata.xml" \

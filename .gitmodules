@@ -10,3 +10,9 @@
 [submodule "curl/src/main/native/nghttp3"]
 	path = curl/src/main/native/nghttp3
 	url = https://github.com/ngtcp2/nghttp3.git
+[submodule "curl/src/main/native/c-ares"]
+	path = curl/src/main/native/c-ares
+	url = https://github.com/c-ares/c-ares.git
+[submodule "curl/src/main/native/boringssl"]
+	path = curl/src/main/native/boringssl
+	url = https://github.com/google/boringssl.git

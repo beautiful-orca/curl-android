@@ -26,11 +26,6 @@ android {
             vcsInfo.include = false
             signingConfig = signingConfigs.debug
             proguardFiles("proguard-rules.pro")
-            externalNativeBuild {
-                ndkBuild {
-                    arguments += [ "enableLTO=1" ]
-                }
-            }
         }
     }
 
@@ -63,7 +58,5 @@ android {
     }
 }
 
-dependencies {
-    releaseImplementation("io.github.vvb2060.ndk:boringssl:20251124-lto-ndk29")
-    debugImplementation("io.github.vvb2060.ndk:boringssl:20251124")
-}
+// BoringSSL is built from the boringssl submodule by scripts/build-boringssl.sh
+// and linked via Android.mk; there is no prefab dependency anymore.

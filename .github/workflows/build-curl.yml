@@ -1,0 +1,278 @@
+name: Build curl with c-ares
+
+# Builds the curl binaries open_webview ships and publishes them as a release.
+#
+# Nothing is pinned in the repo. scripts/resolve-latest.sh resolves the latest
+# stable release of every component at run time -- the curl, c-ares, nghttp2,
+# nghttp3, ngtcp2 and boringssl submodules, AGP, the Gradle wrapper, the JDK LTS
+# and the NDK / build-tools / platform from Google's repository XML -- and the
+# job builds only when that fingerprint differs from the one recorded in the
+# latest release's notes (or when forced). The resolved versions are sed'ed
+# into settings.gradle and the gradle files in the ephemeral runner and the
+# submodules are checked out at their release tags, so there is nothing to
+# commit back and nothing to maintain. A run with no upstream movement costs a
+# handful of API calls and exits in seconds.
+#
+# BoringSSL is built from the google/boringssl submodule (scripts/build-boringssl.sh)
+# with vvb2060's cert-dir patch applied, instead of consuming his prefab, so it
+# tracks upstream release tags directly.
+#
+# The c-ares patch lives in two pre-generated config headers. A build that loses
+# it still succeeds and produces a threaded-resolver binary that fails on device
+# the first time --dns-servers is used. So scripts/patch-config.sh re-asserts the
+# patch before every build and scripts/verify-curl.sh gates the release on the
+# resolver actually being c-ares.
+#
+# A component bump can also need build-glue changes in curl/src/main/native/Android.mk.
+# The 8.18 -> 8.23 bump needed curl/src on the include path, because curl moved
+# the tool sources into src/toolx/. That fix is already on the branch. If a future
+# bump fails to compile, the job fails and publishes nothing; fix the glue, then
+# re-run with force.
+#
+# This workflow must exist on the repository's default branch for the schedule to
+# fire. It always builds the `c-ares` branch, so either make `c-ares` the default
+# branch of the fork or cherry-pick this file onto `master`.
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # daily; exits in seconds when nothing has moved
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild and republish even if no component moved
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-curl
+  cancel-in-progress: false
+
+env:
+  ANDROID_HOME: ${{ github.workspace }}/android-sdk
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the c-ares branch
+        uses: actions/checkout@v4
+        with:
+          ref: c-ares
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Resolve latest component versions
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/resolve-latest.sh
+
+      - name: Decide whether anything moved
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE: ${{ github.event.inputs.force == 'true' }}
+          FP: ${{ steps.resolve.outputs.fingerprint }}
+          CURL_VERSION: ${{ steps.resolve.outputs.curl_version }}
+        run: |
+          set -euo pipefail
+          last_fp=''
+          body=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .body 2>/dev/null || true)
+          if [ -n "$body" ]; then
+            last_fp=$(printf '%s\n' "$body" | sed -n 's/^components: //p' | head -n 1)
+          fi
+
+          echo "latest: $FP"
+          echo "built:  ${last_fp:-<no release yet>}"
+
+          update=false
+          if [ "$FORCE" = true ] || [ -z "$last_fp" ] || [ "$FP" != "$last_fp" ]; then
+            update=true
+          fi
+          echo "update=$update" >> "$GITHUB_OUTPUT"
+
+          if [ "$update" = true ]; then
+            tag="v${CURL_VERSION}"
+            if gh release view "$tag" > /dev/null 2>&1; then
+              # Same curl version but other components moved: publish under a
+              # unique tag. Consumers take the newest release with the asset.
+              tag="v${CURL_VERSION}-$(date -u +%Y%m%d-%H%M%S)"
+            fi
+            echo "tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "will build and publish $tag"
+          else
+            echo "nothing to do"
+          fi
+
+      - name: Check out latest submodule tags
+        if: steps.detect.outputs.update == 'true'
+        env:
+          CURL_TAG: ${{ steps.resolve.outputs.curl_tag }}
+          CARES_TAG: ${{ steps.resolve.outputs.cares_tag }}
+          NGHTTP2_TAG: ${{ steps.resolve.outputs.nghttp2_tag }}
+          NGHTTP3_TAG: ${{ steps.resolve.outputs.nghttp3_tag }}
+          NGTCP2_TAG: ${{ steps.resolve.outputs.ngtcp2_tag }}
+          BSSL_TAG: ${{ steps.resolve.outputs.boringssl_tag }}
+        run: |
+          set -euo pipefail
+          checkout_tag() {
+            git -C "$1" fetch --tags origin
+            # -f: build scripts modify tracked files inside submodules (e.g.
+            # the boringssl cert-dir patch); discard before switching tags,
+            # the scripts re-apply their changes idempotently.
+            git -C "$1" checkout -f "$2"
+            echo "$1 -> $2 ($(git -C "$1" rev-parse --short HEAD))"
+          }
+          checkout_tag curl/src/main/native/curl      "$CURL_TAG"
+          checkout_tag curl/src/main/native/c-ares    "$CARES_TAG"
+          checkout_tag curl/src/main/native/nghttp2   "$NGHTTP2_TAG"
+          checkout_tag curl/src/main/native/nghttp3   "$NGHTTP3_TAG"
+          checkout_tag curl/src/main/native/ngtcp2    "$NGTCP2_TAG"
+          checkout_tag curl/src/main/native/boringssl "$BSSL_TAG"
+          echo "curl version: $(./scripts/curl-version.sh)"
+
+      - name: Apply resolved build-tool versions
+        if: steps.detect.outputs.update == 'true'
+        env:
+          AGP: ${{ steps.resolve.outputs.agp }}
+          NDK_VERSION: ${{ steps.resolve.outputs.ndk_version }}
+          BUILD_TOOLS_VERSION: ${{ steps.resolve.outputs.build_tools_version }}
+          PLATFORM_API: ${{ steps.resolve.outputs.platform_api }}
+          GRADLE_VERSION: ${{ steps.resolve.outputs.gradle_version }}
+        run: |
+          set -euo pipefail
+          sed -i -E "s/(id\(\"com\.android\.[a-z]+\"\) version \")[^\"]+\"/\1${AGP}\"/g" settings.gradle
+          sed -i -E "s/ndkVersion = \"[^\"]*\"/ndkVersion = \"${NDK_VERSION}\"/" settings.gradle
+          sed -i -E "s/buildToolsVersion = \"[^\"]*\"/buildToolsVersion = \"${BUILD_TOOLS_VERSION}\"/" settings.gradle
+          sed -i -E "s/(targetSdk|compileSdk) = [0-9]+/\1 = ${PLATFORM_API}/g" settings.gradle
+          sed -i -E "s|distributions/gradle-[0-9][^/]*-bin\.zip|distributions/gradle-${GRADLE_VERSION}-bin.zip|" gradle/wrapper/gradle-wrapper.properties
+          # AGP 9 removed the flag; false is the default anyway.
+          case "$AGP" in 9*|1[0-9]*) sed -i '/android.nonFinalResIds/d' gradle.properties ;; esac
+          grep -E 'version "|ndkVersion|buildToolsVersion|Sdk = ' settings.gradle
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+
+      - name: Re-assert the c-ares patch
+        if: steps.detect.outputs.update == 'true'
+        run: ./scripts/patch-config.sh
+
+      - name: Materialise generated sources
+        if: steps.detect.outputs.update == 'true'
+        run: ./scripts/prepare-sources.sh
+
+      - name: Set up JDK
+        if: steps.detect.outputs.update == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '${{ steps.resolve.outputs.jdk }}'
+
+      # Downloaded directly rather than through sdkmanager: the NDK version has
+      # to match settings.gradle exactly, and recent cmdline-tools releases
+      # route sdkmanager through a wrapper that can stall. The zip names come
+      # from Google's repository XML via resolve-latest.sh.
+      - name: Install Android SDK pieces
+        if: steps.detect.outputs.update == 'true'
+        env:
+          NDK_VERSION: ${{ steps.resolve.outputs.ndk_version }}
+          NDK_ZIP: ${{ steps.resolve.outputs.ndk_zip }}
+          BUILD_TOOLS_VERSION: ${{ steps.resolve.outputs.build_tools_version }}
+          BUILD_TOOLS_ZIP: ${{ steps.resolve.outputs.build_tools_zip }}
+          PLATFORM_VERSION: ${{ steps.resolve.outputs.platform }}
+          PLATFORM_ZIP: ${{ steps.resolve.outputs.platform_zip }}
+          PLATFORM_TOOLS_ZIP: ${{ steps.resolve.outputs.platform_tools_zip }}
+        run: |
+          set -euo pipefail
+          base=https://dl.google.com/android/repository
+          tmp=$(mktemp -d)
+
+          mkdir -p "$ANDROID_HOME/ndk" \
+                   "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" \
+                   "$ANDROID_HOME/platforms/$PLATFORM_VERSION"
+
+          curl -fsSL -o "$tmp/ndk.zip"    "$base/$NDK_ZIP"
+          curl -fsSL -o "$tmp/bt.zip"     "$base/$BUILD_TOOLS_ZIP"
+          curl -fsSL -o "$tmp/plat.zip"   "$base/$PLATFORM_ZIP"
+          curl -fsSL -o "$tmp/ptools.zip" "$base/$PLATFORM_TOOLS_ZIP"
+
+          unzip -q "$tmp/ndk.zip"    -d "$tmp/ndk"
+          unzip -q "$tmp/bt.zip"     -d "$tmp/bt"
+          unzip -q "$tmp/plat.zip"   -d "$tmp/plat"
+          unzip -q "$tmp/ptools.zip" -d "$ANDROID_HOME"
+
+          mv "$tmp"/ndk/android-ndk-r*/ "$ANDROID_HOME/ndk/$NDK_VERSION"
+          mv "$tmp"/bt/*   "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          mv "$tmp"/plat/* "$ANDROID_HOME/platforms/$PLATFORM_VERSION"
+
+          ls "$ANDROID_HOME/ndk" "$ANDROID_HOME/build-tools" "$ANDROID_HOME/platforms"
+
+      - name: Build BoringSSL
+        if: steps.detect.outputs.update == 'true'
+        run: ./scripts/build-boringssl.sh
+
+      - name: Build c-ares
+        if: steps.detect.outputs.update == 'true'
+        run: ./scripts/build-cares.sh
+
+      - name: Build curl
+        if: steps.detect.outputs.update == 'true'
+        run: ./gradlew :tool:assembleRelease --no-daemon --console=plain
+
+      - name: Extract binaries
+        if: steps.detect.outputs.update == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86 x86_64 riscv64; do
+            unzip -o -j tool/build/outputs/apk/release/tool-release.apk \
+              "lib/$abi/libcurl.so" -d /tmp/x
+            mv /tmp/x/libcurl.so "dist/curl-$abi"
+          done
+          ls -l dist
+
+      - name: Verify
+        if: steps.detect.outputs.update == 'true'
+        run: ./scripts/verify-curl.sh dist
+
+      - name: Checksums
+        if: steps.detect.outputs.update == 'true'
+        working-directory: dist
+        run: sha256sum curl-* > SHA256SUMS
+
+      - name: Publish release
+        if: steps.detect.outputs.update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.detect.outputs.tag }}
+          CURL_VERSION: ${{ steps.resolve.outputs.curl_version }}
+          FP: ${{ steps.resolve.outputs.fingerprint }}
+          NDK_VERSION: ${{ steps.resolve.outputs.ndk_version }}
+          BSSL_TAG: ${{ steps.resolve.outputs.boringssl_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "release $TAG already exists; leaving it alone"
+            exit 0
+          fi
+          {
+            echo "curl $CURL_VERSION built with c-ares."
+            echo
+            echo "- resolver: c-ares — \`--dns-servers\` works, threaded resolver not compiled"
+            echo "- TLS: BoringSSL $BSSL_TAG built from source (google/boringssl submodule, vvb2060 cert-dir patch)"
+            echo "- NDK $NDK_VERSION, 16 KB aligned on arm64-v8a and x86_64"
+            echo "- source: \`c-ares\` branch at $(git rev-parse --short HEAD)"
+            echo
+            echo "components: $FP"
+            echo
+            echo '```'
+            git submodule status
+            echo
+            cat dist/SHA256SUMS
+            echo '```'
+          } > /tmp/notes.md
+          gh release create "$TAG" dist/* \
+            --title "curl $CURL_VERSION + c-ares" \
+            --notes-file /tmp/notes.md

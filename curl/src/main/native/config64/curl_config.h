@@ -824,7 +824,7 @@
 /* #undef USE_APPLE_SECTRUST */
 
 /* Define to enable c-ares support */
-/* #undef USE_ARES */
+#define USE_ARES 1
 
 /* if libbacktrace is in use */
 /* #undef USE_BACKTRACE */
@@ -893,7 +893,7 @@
 #define USE_SSLS_EXPORT 1
 
 /* if you want POSIX threaded DNS lookup */
-#define USE_THREADS_POSIX 1
+/* #undef USE_THREADS_POSIX */
 
 /* if you want Win32 threaded DNS lookup */
 /* #undef USE_THREADS_WIN32 */

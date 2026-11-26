@@ -38,6 +38,18 @@ jobs:
           echo 'org.gradle.caching=true' >> gradle.properties
           echo 'org.gradle.parallel=true' >> gradle.properties
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+      # The prebuilt static libraries (BoringSSL, c-ares) are build artifacts,
+      # not committed. Install the NDK pinned in settings.gradle first, because
+      # the scripts locate it under $ANDROID_HOME/ndk/ before Gradle runs.
+      - name: Install pinned NDK and build the prebuilt libraries
+        shell: bash
+        run: |
+          ndk=$(sed -n 's/.*ndkVersion = "\([^"]*\)".*/\1/p' settings.gradle)
+          bt=$(sed -n 's/.*buildToolsVersion = "\([^"]*\)".*/\1/p' settings.gradle)
+          plat=$(sed -n 's/.*compileSdk = \([0-9]*\).*/android-\1/p' settings.gradle)
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;$ndk" "build-tools;$bt" "platforms;$plat" > /dev/null
+          ./scripts/build-boringssl.sh
+          ./scripts/build-cares.sh
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -48,7 +60,6 @@ jobs:
         run: |
           ./gradlew :t:assemble
           ./gradlew :c:publishToMavenLocal
-          ./gradlew :c:publishToMavenLocal -PenableLTO=1
       - name: Upload app
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

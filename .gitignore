@@ -8,3 +8,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+/curl/src/main/native/prebuilt
+/out
+/dist

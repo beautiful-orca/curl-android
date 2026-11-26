@@ -2,7 +2,11 @@
 
 curl tool and libcurl static library prefab for android.
 
-Supports TLS, powered by [BoringSSL](https://github.com/vvb2060/BoringSSL_Android).
+Supports TLS, powered by [BoringSSL](https://github.com/google/boringssl). In this
+fork BoringSSL is built from the `google/boringssl` submodule by
+`scripts/build-boringssl.sh` (with the cert-dir patch from
+`vvb2060/BoringSSL_Android` vendored under `curl/src/main/native/patches/`), not
+consumed as a Maven prefab.
 
 Supports HTTP/2, powered by [nghttp2](https://github.com/nghttp2/nghttp2).
 

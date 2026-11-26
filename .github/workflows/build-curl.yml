@@ -49,9 +49,11 @@ concurrency:
   group: build-curl
   cancel-in-progress: false
 
-env:
-  ANDROID_HOME: ${{ github.workspace }}/android-sdk
-  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+# No custom ANDROID_HOME: the runner image's SDK root has the license hashes
+# pre-accepted, and AGP refuses directly-downloaded packages without them.
+# The resolved NDK / build-tools / platform are installed into that root by
+# the "Install Android SDK pieces" step, and the build scripts pick the NDK
+# via $NDK_VERSION (the image ships its own NDK side by side).
 
 jobs:
   build:
@@ -209,10 +211,14 @@ jobs:
 
       - name: Build BoringSSL
         if: steps.detect.outputs.update == 'true'
+        env:
+          NDK_VERSION: ${{ steps.resolve.outputs.ndk_version }}
         run: ./scripts/build-boringssl.sh
 
       - name: Build c-ares
         if: steps.detect.outputs.update == 'true'
+        env:
+          NDK_VERSION: ${{ steps.resolve.outputs.ndk_version }}
         run: ./scripts/build-cares.sh
 
       - name: Build curl

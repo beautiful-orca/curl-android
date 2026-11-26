@@ -6,9 +6,13 @@
 # gitignored; it is a build artifact, not a source file.
 set -eu
 
-# The workflow installs whichever NDK resolve-latest.sh picked, so there is
-# exactly one directory under ndk/; do not hardcode a version here.
-NDK=$(ls -d "${ANDROID_HOME:?set ANDROID_HOME}"/ndk/*/ 2>/dev/null | head -n 1 || true)
+# The workflow passes NDK_VERSION (the image's SDK root ships its own NDK side
+# by side); fall back to the only installed NDK for manual runs.
+if [ -n "${NDK_VERSION:-}" ]; then
+  NDK="${ANDROID_HOME:?set ANDROID_HOME}/ndk/$NDK_VERSION"
+else
+  NDK=$(ls -d "${ANDROID_HOME:?set ANDROID_HOME}"/ndk/*/ 2>/dev/null | head -n 1 || true)
+fi
 SRC="curl/src/main/native/c-ares"
 OUT="curl/src/main/native/prebuilt"
 

@@ -11,7 +11,13 @@
 # on ubuntu-latest runners.
 set -eu
 
-NDK=$(ls -d "${ANDROID_HOME:?set ANDROID_HOME}"/ndk/*/ 2>/dev/null | head -n 1 || true)
+# The workflow passes NDK_VERSION (the image's SDK root ships its own NDK side
+# by side); fall back to the only installed NDK for manual runs.
+if [ -n "${NDK_VERSION:-}" ]; then
+  NDK="${ANDROID_HOME:?set ANDROID_HOME}/ndk/$NDK_VERSION"
+else
+  NDK=$(ls -d "${ANDROID_HOME:?set ANDROID_HOME}"/ndk/*/ 2>/dev/null | head -n 1 || true)
+fi
 SRC="curl/src/main/native/boringssl"
 OUT="curl/src/main/native/prebuilt"
 

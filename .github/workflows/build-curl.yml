@@ -29,9 +29,8 @@ name: Build curl with c-ares
 # bump fails to compile, the job fails and publishes nothing; fix the glue, then
 # re-run with force.
 #
-# This workflow must exist on the repository's default branch for the schedule to
-# fire. It always builds the `c-ares` branch, so either make `c-ares` the default
-# branch of the fork or cherry-pick this file onto `master`.
+# This workflow must exist on the repository's default branch for the schedule
+# to fire; it builds that branch (master on this fork).
 
 on:
   schedule:
@@ -58,10 +57,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out the c-ares branch
+      - name: Check out the default branch
         uses: actions/checkout@v4
         with:
-          ref: c-ares
           submodules: recursive
           fetch-depth: 0
 
@@ -263,7 +261,7 @@ jobs:
             echo "- resolver: c-ares — \`--dns-servers\` works, threaded resolver not compiled"
             echo "- TLS: BoringSSL $BSSL_TAG built from source (google/boringssl submodule, vvb2060 cert-dir patch)"
             echo "- NDK $NDK_VERSION, 16 KB aligned on arm64-v8a and x86_64"
-            echo "- source: \`c-ares\` branch at $(git rev-parse --short HEAD)"
+            echo "- source: \`${GITHUB_REF_NAME}\` branch at $(git rev-parse --short HEAD)"
             echo
             echo "components: $FP"
             echo

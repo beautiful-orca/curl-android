@@ -75,9 +75,16 @@ LOCAL_STATIC_LIBRARIES  := ngtcp2_crypto_static
 include $(BUILD_STATIC_LIBRARY)
 
 include $(CLEAR_VARS)
-include $(LOCAL_PATH)/ngtcp2/crypto/boringssl/Makefile.am
+# Do not include the upstream Makefile.am directly: recent ngtcp2 adds
+# automake conditionals (`if HAVE_CRYPTOTEST`) that ndk-build's make cannot
+# parse ("missing separator"). Extract just the sources variable, and fail
+# loudly if upstream renames or restructures it.
+NGTCP2_CRYPTO_BORINGSSL_SOURCES := $(shell sed -n 's/^libngtcp2_crypto_boringssl_a_SOURCES[[:space:]]*=[[:space:]]*//p' $(LOCAL_PATH)/ngtcp2/crypto/boringssl/Makefile.am)
+ifeq ($(strip $(NGTCP2_CRYPTO_BORINGSSL_SOURCES)),)
+$(error cannot extract libngtcp2_crypto_boringssl_a_SOURCES from ngtcp2/crypto/boringssl/Makefile.am)
+endif
 LOCAL_MODULE            := ngtcp2_crypto_static
-LOCAL_SRC_FILES         += $(addprefix ngtcp2/crypto/boringssl/,$(libngtcp2_crypto_boringssl_a_SOURCES))
+LOCAL_SRC_FILES         += $(addprefix ngtcp2/crypto/boringssl/,$(NGTCP2_CRYPTO_BORINGSSL_SOURCES))
 LOCAL_C_INCLUDES        := $(LOCAL_PATH)/ngtcp2/lib $(LOCAL_PATH)/ngtcp2/lib/includes
 LOCAL_C_INCLUDES        += $(LOCAL_PATH)/ngtcp2/crypto $(LOCAL_PATH)/ngtcp2/crypto/includes
 LOCAL_C_INCLUDES        += $(LOCAL_PATH)/config
